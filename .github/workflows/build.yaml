@@ -8,7 +8,6 @@ on:
       - "*.md"
       - "*.sh"
       - "release.yaml"
-  #      - "sync_frp.yaml"
 
   workflow_dispatch:
 
@@ -64,47 +63,62 @@ jobs:
 
       - name: Init Signature
         run: |
-          touch local.properties
+          # 1. 进入 android 目录，这里是 Gradle 查找 local.properties 的默认位置
           cd android
-          echo ALIAS_NAME='${{ secrets.ALIAS_NAME }}' >> local.properties
-          echo ALIAS_PASSWORD='${{ secrets.ALIAS_PASSWORD }}' >> local.properties
-          echo KEY_PASSWORD='${{ secrets.KEY_PASSWORD }}' >> local.properties
-          echo KEY_PATH='./key.jks' >> local.properties
-          # 从Secrets读取无换行符Base64解码, 然后保存到到app/key.jks
-          echo ${{ secrets.KEY_STORE }} | base64 --decode > $GITHUB_WORKSPACE/android/app/key.jks
+          
+          # 2. 写入签名配置信息。注意使用单引号包裹 Secrets 以处理可能的特殊字符
+          echo "ALIAS_NAME='${{ secrets.ALIAS_NAME }}'" > local.properties
+          echo "ALIAS_PASSWORD='${{ secrets.ALIAS_PASSWORD }}'" >> local.properties
+          echo "KEY_PASSWORD='${{ secrets.KEY_PASSWORD }}'" >> local.properties
+          
+          # 3. 关键修复：这里的路径必须相对于 android/ 目录，或者使用绝对路径
+          # 因为你的 build.gradle 使用 file(pro["KEY_PATH"])，它会基于当前项目目录查找
+          echo "KEY_PATH='./app/key.jks'" >> local.properties
+          
+          # 4. 解码密钥文件到正确的子目录
+          mkdir -p app
+          echo "${{ secrets.KEY_STORE }}" | base64 --decode > app/key.jks
+          
+          # 5. 验证文件是否生成成功（大小应 > 0）
+          ls -l app/key.jks
 
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.19.6'
-      - run: flutter build apk --split-per-abi --release
+          cache: true
+
+      - name: Build APK
+        run: flutter build apk --split-per-abi --release
 
       - name: Upload missing_rules.txt
-        if: failure() && steps.gradle.outcome != 'success'
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: "missing_rules"
           path: "${{ github.workspace }}/build/app/outputs/mapping/release/missing_rules.txt"
 
       - name: Init APP Version Name
+        if: success()
         run: |
+          # 提取版本号用于 Artifact 命名
           echo "ver_name=$(grep -m 1 'versionName' ${{ env.output }}/output-metadata.json | cut -d\" -f4)" >> $GITHUB_ENV
 
       - name: Upload App To Artifact arm64-v8a
-        if: success () || failure ()
+        if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
           name: "AListFlutter-v${{ env.ver_name }}_arm64-v8a"
           path: "${{ env.output }}/*-v8a.apk"
 
       - name: Upload App To Artifact arm-v7a
-        if: success () || failure ()
+        if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
           name: "AListFlutter-v${{ env.ver_name }}_arm-v7a"
           path: "${{ env.output }}/*-v7a.apk"
 
       - name: Upload App To Artifact x86
-        if: success () || failure ()
+        if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
           name: "AListFlutter-v${{ env.ver_name }}_x86_64"
