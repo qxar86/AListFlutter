@@ -8,6 +8,7 @@ on:
       - "*.md"
       - "*.sh"
       - "release.yaml"
+
   workflow_dispatch:
 
 jobs:
@@ -62,22 +63,22 @@ jobs:
 
       - name: Init Signature
         run: |
-          # 1. 进入 android 目录创建 local.properties
+          # 1. 进入 android 目录
           cd android
-          echo "ALIAS_NAME='${{ secrets.ALIAS_NAME }}'" > local.properties
-          echo "ALIAS_PASSWORD='${{ secrets.ALIAS_PASSWORD }}'" >> local.properties
-          echo "KEY_PASSWORD='${{ secrets.KEY_PASSWORD }}'" >> local.properties
           
-          # 2. 核心修复：这里的路径改为只写文件名 'key.jks'
-          # 因为 build.gradle 在 app 目录下执行，file('key.jks') 会直接指向 app/key.jks
-          echo "KEY_PATH='key.jks'" >> local.properties
+          # 2. 写入 local.properties (移除引号干扰)
+          echo "ALIAS_NAME=${{ secrets.ALIAS_NAME }}" > local.properties
+          echo "ALIAS_PASSWORD=${{ secrets.ALIAS_PASSWORD }}" >> local.properties
+          echo "KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}" >> local.properties
+          # 这里设为 key.jks，因为 Gradle 会在 app 模块内寻找
+          echo "KEY_PATH=key.jks" >> local.properties
           
-          # 3. 将文件解码到 android/app/ 目录下
+          # 3. 将证书文件解码并直接放入 android/app 目录下
           mkdir -p app
           echo "${{ secrets.KEY_STORE }}" | base64 --decode > app/key.jks
           
-          # 验证文件位置
-          echo "Current Path: $(pwd)"
+          # 4. 调试输出：确认文件存在且有大小
+          echo "Checking keystore file..."
           ls -l app/key.jks
 
       - uses: subosito/flutter-action@v2
@@ -91,6 +92,7 @@ jobs:
       - name: Init APP Version Name
         if: success()
         run: |
+          # 动态提取版本号用于 Artifact 命名
           echo "ver_name=$(grep -m 1 'versionName' ${{ env.output }}/output-metadata.json | cut -d\" -f4)" >> $GITHUB_ENV
 
       - name: Upload App To Artifacts
