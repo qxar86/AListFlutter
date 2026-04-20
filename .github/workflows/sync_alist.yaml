@@ -16,7 +16,7 @@ jobs:
     env:
       VERSION_FILE: ${{ github.workspace }}/alist_version
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - run: |
           cd $GITHUB_WORKSPACE/.github/scripts
           chmod +x ./*.sh
