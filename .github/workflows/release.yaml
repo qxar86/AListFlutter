@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 jobs:
- android:
+  android:
     runs-on: ubuntu-latest
     env:
       output: "${{ github.workspace }}/build/app/outputs/apk/release"
@@ -17,6 +17,26 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Get App Version
+        id: app_version
+        run: |
+          VERSION=$(grep 'version:' pubspec.yaml | head -n1 | awk '{print $2}' || echo "1.0.0+1")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Setup Caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.android/build-cache
+            ~/go/pkg/mod
+            ~/.pub-cache
+            ${{ github.workspace }}/.dart_tool
+          key: ${{ runner.os }}-deps-${{ hashFiles('**/pubspec.lock', '**/go.sum', '**/*.gradle*') }}
+          restore-keys: |
+            ${{ runner.os }}-deps-
 
       - name: Download AList Source Code
         run: |
@@ -42,20 +62,27 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/gradle-build-action@v3
+        with:
+          cache-read-only: false
+          gradle-home-cache-includes: |
+            caches
+            notifications
+            .setup-gradle
 
       - name: Build AList
         run: |
-            cd $GITHUB_WORKSPACE/alist-lib/scripts
-            chmod +x *.sh
-            ./init_gomobile.sh
-            ./gobind.sh
+          cd $GITHUB_WORKSPACE/alist-lib/scripts
+          chmod +x *.sh
+          ./init_gomobile.sh
+          ./gobind.sh
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          GO111MODULE: "on"
 
       - name: Upload AAR
         uses: actions/upload-artifact@v4
         with:
-          name: "AList"
+          name: "AList-${{ steps.app_version.outputs.version }}"
           path: "${{ github.workspace }}/android/app/libs/*.aar"
 
       - name: Init Signature
@@ -72,18 +99,37 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.19.6'
-      - run: flutter build apk --split-per-abi --release
+          cache: true
+          cache-key: flutter-${{ runner.os }}-${{ hashFiles('**/pubspec.lock') }}
+
+      - name: Flutter Dependencies
+        run: flutter pub get
+
+      - name: Build APK
+        run: |
+          flutter build apk \
+            --split-per-abi \
+            --release \
+            --no-pub \
+            --build-name=$(echo ${{ steps.app_version.outputs.version }} | cut -d+ -f1) \
+            --build-number=$(echo ${{ steps.app_version.outputs.version }} | cut -d+ -f2)
 
       - name: Upload missing_rules.txt
         if: failure() && steps.gradle.outcome != 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: "missing_rules"
+          name: "missing_rules-${{ github.run_number }}"
           path: "${{ github.workspace }}/build/app/outputs/mapping/release/missing_rules.txt"
 
       - name: Init APP Version Name
         run: |
-          echo "ver_name=$(grep -m 1 'versionName' ${{ env.output }}/output-metadata.json | cut -d\" -f4)" >> $GITHUB_ENV
+          if [ -z "${{ env.ver_name }}" ]; then
+            if [ -f "${{ env.output }}/output-metadata.json" ]; then
+              echo "ver_name=$(grep -m 1 'versionName' ${{ env.output }}/output-metadata.json | cut -d\" -f4)" >> $GITHUB_ENV
+            else
+              echo "ver_name=${{ steps.app_version.outputs.version }}" >> $GITHUB_ENV
+            fi
+          fi
 
       - uses: softprops/action-gh-release@v1
         with:
